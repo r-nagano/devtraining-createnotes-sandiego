@@ -1,29 +1,84 @@
 <?xml version="1.0" encoding="UTF-8"?><record_update table="sp_widget">
     <sp_widget action="INSERT_OR_UPDATE">
         <category>custom</category>
-        <client_script><![CDATA[function($rootScope,$scope) {
-	/* widget controller */
-	var c = this;
-	// Use a position indicator to know which record to update
-	c.notePos = 0;
+        <client_script><![CDATA[function($rootScope, $scope, spUtil) {
+    /* widget controller */
+    var c = this;
+    // Use a position indicator to know which record to update
+    c.notePos = 0;
 
-	c.selectItem = function(idx) {  
-		// Set the position indicator to the index value passed in on select
-		c.notePos = idx;
-		var id = c.data.notes[idx].sys_id;
-		console.log('Note ID: ' + id);
-		$rootScope.noteID = id;
-		$rootScope.$emit('selectNote', id);
-	}
-  // Subscribe to event.  Set the new title and note values on the 
-	// c.data object
-	$rootScope.$on('updateTitle', function(event,data) { 
-		console.log("updateTitle event received: " + event);
-		console.log(data);
-		c.data.notes[c.notePos].title = data.title;
-		c.data.notes[c.notePos].note = data.note;
-	});
+    c.selectItem = function(idx) {
+        // Set the position indicator to the index value passed in on select
+        c.notePos = idx;
+        var id = c.data.notes[idx].sys_id;
+        console.log('Note ID: ' + id);
+        $rootScope.noteID = id;
+        $rootScope.$emit('selectNote', id);
+    }
+    // Subscribe to event.  Set the new title and note values on the 
+    // c.data object
+    $rootScope.$on('updateTitle', function(event, data) {
+        console.log("updateTitleイベントを受け取ったよ: " + event);
+        console.log(data);
+        c.data.notes[c.notePos].title = data.title;
+        c.data.notes[c.notePos].note = data.note;
+    });
+
 	
+    // Record removed from data object on the client and passed to server
+    c.snNoteUpdate = function(name, sysID) {
+
+        for (var i = 0; i < c.data.notes.length; i++) {
+            if (c.data.notes[i].sys_id == name.data.sys_id) {
+                if (name.data.record.note) {
+                    c.data.notes[i].note = name.data.record.note.display_value;
+                }
+                if (name.data.record.title) {
+                    c.data.notes[i].title = name.data.record.title.display_value;
+                }
+                c.server.update();
+
+            }
+        }
+    }
+
+    /*
+	// Record removed from data object on the server and passed back to client
+    c.snNoteDelete = function(sysID) {
+
+        c.server.get({
+            action: 'snDeleteNote',
+            noteID: sysID
+
+        }).then(function(r) {
+            c.data.notes = r.data.notes;
+        });
+    }
+	*/
+
+    // 
+    //れこーどうぉっちに関する部分
+    // 
+    spUtil.recordWatch($scope, "x_snc_createnotes_note", "numberANYTHING", function(name) {
+        console.log(name.data.operation);
+        console.log(name);
+
+        // Calls a Client Script function to do the update and pass the updated data object
+        // to the server.
+        if (name.data.operation == "update") {
+            c.snNoteUpdate(name, name.data.sys_id);
+        }
+        // Calls a Client Script function which deletes a record on the server and passes
+        // the updated data object back to the client.
+        if (name.data.operation == "delete") {
+            c.snNoteDelete(name.data.sys_id);
+        }
+
+        // 新規挿入したらポータルというかウィジェットをリフレッシュ
+        if (name.data.operation == "insert") {
+            c.server.refresh();
+        }
+    });
 }]]></client_script>
         <controller_as>c</controller_as>
         <css/>
@@ -36,8 +91,8 @@
         <id>notes_list</id>
         <internal>false</internal>
         <link><![CDATA[function link(scope, element, attrs, controller) {  }]]></link>
-        <name>Notes List</name>
-        <option_schema/>
+        <name>のーつList</name>
+        <option_schema>[{"hint":"ノートリストウィジェットのタイトルを指定します","name":"noteslist_optiondayon","section":"other","default_value":"でふぉるとばりゅー","label":"のーつりすとオプション","type":"string"},{"hint":"表示するレコードの最大数を選択します","name":"maximum_records_to_display","section":"other","default_value":"5","label":"表示する最大レコード","type":"choice","choices":[{"label":"2","value":"2"},{"label":"3","value":"3"},{"label":"5","value":"5"},{"label":"7","value":"7"},{"label":"11","value":"11"},{"label":"13","value":"13"},{"label":"17","value":"17"}]}]</option_schema>
         <public>false</public>
         <roles/>
         <script><![CDATA[(function() {
@@ -46,43 +101,66 @@
 	var noteGR = new GlideRecord('x_snc_createnotes_note');
 	noteGR.addQuery('user', gs.getUser().getID());
 	noteGR.orderByDesc('sys_created_on');
+	noteGR.setLimit(options.maximum_records_to_display); //オプションスキーマの最大表示件数を変数でセット。
 	noteGR.query();
 	while (noteGR.next()) {
 		var noteObj = {};
 		//use service portal helper method to get some display values
 		$sp.getRecordDisplayValues(noteObj, noteGR, 'number,title,sys_id');
 		//get the first 20 characters of the description
-		noteObj.note = noteGR.getValue('note').slice(0,20);
+		noteObj.note = noteGR.getValue('note').slice(0,20); //表示文字数を20文字までにする
 		//push the populated obj into the array
 		data.notes.push(noteObj);
 	}
-})();]]></script>
+	
+	/*if (input.action == 'snDeleteNote') {
+      var delNote = new GlideRecord('x_snc_createnotes_note');
+      // The notes record should already be gone.  Just
+      // making sure it no longer exists.
+      if(delNote.get(input.noteID)){
+        delNote.deleteRecord();
+      }
+    }*/
+
+})();
+
+/*
+1. オブジェクトの配列を含むデータオブジェクトにnotesプロパティを作成します
+2. データベースをクエリして、現在ログインしているユーザーのすべてのNoteテーブルレコードを検索します
+3. sys_created_on日付フィールド値に基づいて降順でレコードを並べ替えます
+4. 返されたノートレコードごとに
+    a. 空のオブジェクトnoteObjを作成します
+    b. number、title、およびsys_idフィールドの表示値を取得し、それらの値をnoteObjオブジェクトに入れます
+    c. 説明フィールドの最初の20文字を取得し、その値をnoteObjオブジェクトに追加します
+    d. noteObjをnotes配列にプッシュします
+*/]]></script>
         <servicenow>false</servicenow>
         <sys_class_name>sp_widget</sys_class_name>
         <sys_created_by>admin</sys_created_by>
         <sys_created_on>2019-05-30 18:13:04</sys_created_on>
         <sys_id>06948fa8db3133000613a08a4896194c</sys_id>
-        <sys_mod_count>6</sys_mod_count>
-        <sys_name>Notes List</sys_name>
+        <sys_mod_count>30</sys_mod_count>
+        <sys_name>のーつList</sys_name>
         <sys_package display_value="CreateNotes" source="x_snc_createnotes">df5fd9a5090232007f44e1046c8ff69f</sys_package>
         <sys_policy/>
         <sys_scope display_value="CreateNotes">df5fd9a5090232007f44e1046c8ff69f</sys_scope>
         <sys_update_name>sp_widget_06948fa8db3133000613a08a4896194c</sys_update_name>
-        <sys_updated_by>admin</sys_updated_by>
-        <sys_updated_on>2019-05-30 18:59:22</sys_updated_on>
+        <sys_updated_by>nagaryu1</sys_updated_by>
+        <sys_updated_on>2022-05-18 07:48:33</sys_updated_on>
         <template><![CDATA[<div class="panel panel-default">
   <div class="panel-heading clearfix">
     <h3 class="panel-title pull-left">
-      ${Notes}
+      {{::c.options.noteslist_optiondayon}} <!--オプションスキーマのタイトルバーの文字列を変数でセット-->
+      <!--${Notes}のタイトルバーだぜ-->
     </h3>
   </div>
   <div class="list-group">
     <a class="list-group-item" ng-click="c.selectItem($index)" ng-repeat="note in data.notes">
       <h4 class="list-group-item-heading">
-        {{note.title}}
+        {{note.number}}は、{{note.title}}じゃけん
       </h4>
       <p class="list-group-item-text">
-        {{note.note}}
+        {{note.note}}なのさ
       </p>
     </a>
   </div>
